@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../log.hpp"
+#include <log.hpp>
 
 TEST(LogTest, InitLogNoChannel)
 {

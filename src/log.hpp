@@ -3,35 +3,28 @@
 
 #include <iostream>
 #include <string>
-#include <fstream>
-
-#include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/log/support/date_time.hpp>
 #include <boost/log/common.hpp>
 #include <boost/log/expressions.hpp>
-#include <boost/format.hpp>
-#include <boost/log/core.hpp>
 #include <boost/log/expressions/keyword.hpp>
-#include <boost/log/keywords/format.hpp>
-#include <boost/log/sinks.hpp>
-#include <boost/log/utility/manipulators/dump.hpp>
-#include <boost/log/utility/setup/from_stream.hpp>
-#include <boost/log/utility/setup/file.hpp>
-#include <boost/log/utility/setup/console.hpp>
-#include <boost/log/utility/setup/common_attributes.hpp>
-#include <boost/log/attributes/attribute.hpp>
+
 #include <boost/log/attributes.hpp>
 #include <boost/log/attributes/timer.hpp>
 #include <boost/log/sources/logger.hpp>
 #include <boost/log/sources/severity_logger.hpp>
-#include <boost/log/sources/severity_channel_logger.hpp>
-#include <boost/log/sources/channel_feature.hpp>
-#include <boost/log/sources/channel_logger.hpp>
 #include <boost/log/sinks/async_frontend.hpp>
-#include <boost/log/sinks/text_file_backend.hpp>
+// #include <boost/log/sinks/text_multifile_backend.hpp>
+// #include <boost/log/sinks/text_file_backend.hpp>
+#include "text_file_backend_self_defined.hpp"
+
+// #include <boost/log/utility/setup/file.hpp>
+#include <boost/log/utility/setup/console.hpp>
+#include <boost/log/utility/setup/common_attributes.hpp>
+
 #include <boost/log/attributes/named_scope.hpp>
 #include <boost/log/trivial.hpp>
+#include <boost/filesystem.hpp>
 
 namespace goodlog
 {
@@ -71,12 +64,12 @@ BOOST_LOG_ATTRIBUTE_KEYWORD(log_timestamp, "TimeStamp", boost::posix_time::ptime
 
 #define LOG_DEBUG_HEX(data, len, text) MY_BOOST_LOG(debug) << text << " Data[" << boost::log::dump(data, len) << "]"
 
-#define LOG_Channel_Trace(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::trace) << "[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:" //白色字体
-#define LOG_Channel_Debug(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::debug)<< "[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:" //白色字体
-#define LOG_Channel_Info(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::info)<<"\033[32m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //绿色字体
-#define LOG_Channel_Warn(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::warning)<<"\033[33m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //黄色字体
-#define LOG_Channel_Error(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::error)<<"\033[31m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //红色字体
-#define LOG_Channel_Fatal(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<log::loggerChannelType &>(log::channelLogger), channelName, boost::log::trivial::fatal)<<"\033[34m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //蓝色字体
+#define LOG_Channel_Trace(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::trace) << "[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:" //白色字体
+#define LOG_Channel_Debug(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::debug)<< "[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:" //白色字体
+#define LOG_Channel_Info(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::info)<<"\033[32m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //绿色字体
+#define LOG_Channel_Warn(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::warning)<<"\033[33m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //黄色字体
+#define LOG_Channel_Error(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::error)<<"\033[31m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //红色字体
+#define LOG_Channel_Fatal(channelName) BOOST_LOG_CHANNEL_SEV(const_cast<itage::log::loggerChannelType &>(itage::log::channelLogger), channelName, boost::log::trivial::fatal)<<"\033[34m"<<"[" << GetFileName(__FILE__) << ":" << __LINE__ << "]:"<<"\033[0m" //蓝色字体
 
 #define LOG_Channel_DEBUG_HEX(channelName, data, len, text) LOG_Channel_Debug(channelName) << text << " DataLen:" << len << " Data[" << boost::log::dump(data, len) << "]"
 
@@ -104,7 +97,7 @@ static inline void logInit(std::string log_path_str, int in_console_level, int i
 
     logging::add_common_attributes();
 
-    typedef sinks::asynchronous_sink<sinks::text_file_backend> async_sink;  
+    typedef sinks::asynchronous_sink<sinks::text_file_backend_self_defined> async_sink;  
     boost::shared_ptr<async_sink> file_sink = boost::make_shared<async_sink>(); 
 
     file_sink->locked_backend()->set_file_name_pattern(log_path_str + "%5N-%Y-%m-%d-%H-%M-%S.log"); //五位序列号-年-月-日-时-分-秒.log
@@ -148,4 +141,4 @@ static inline void logInit(std::string log_path_str, int in_console_level, int i
 
 }
 
-#endif //LOG_HPP
+#endif
