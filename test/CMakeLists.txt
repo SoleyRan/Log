@@ -1,26 +1,21 @@
-cmake_minimum_required(VERSION 3.5)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+cmake_minimum_required(VERSION 3.10)
+project(LogTest)
+
 set(CMAKE_CXX_STANDARD 17)
 
-project(log_test)
+enable_testing()
 
-find_package(Boost REQUIRED)
-if (Boost_FOUND)
-    message("Boost found: ${Boost_INCLUDE_DIRS}")
-else ()
-    message(FATAL_ERROR "Cannot find Boost")
-endif ()
+# GoogleTest
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIRS})
 
-add_executable(${PROJECT_NAME} test.cpp)
+# Boost
+find_package(Boost REQUIRED COMPONENTS log filesystem system thread date_time)
+include_directories(${Boost_INCLUDE_DIRS})
+
+add_executable(${PROJECT_NAME} log_test.cpp ../log.hpp)
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DBOOST_LOG_DYN_LINK)
-target_include_directories(${PROJECT_NAME} PUBLIC ${Boost_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} PUBLIC 
-    -lboost_system 
-    -lboost_log_setup
-    -lboost_log
-    -lboost_thread
-    -lboost_filesystem
-    -lrt
-    -ldl
-    -lpthread
-)
+target_link_libraries(${PROJECT_NAME} PRIVATE GTest::GTest GTest::Main ${Boost_LIBRARIES})
+
+include(GoogleTest)
+gtest_discover_tests(${PROJECT_NAME})
