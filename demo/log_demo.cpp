@@ -4,7 +4,7 @@
 
 int main()
 {
-    std::string log_path = "/home/work/log/";
+    std::string log_path = "/tmp/goodlog/";
     int console_log_level = 2;
     int file_log_level = 3;
     int max_log_size = 10;
