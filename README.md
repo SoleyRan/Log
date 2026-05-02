@@ -128,15 +128,15 @@ Dependencies:
 
 ```text
 .
-├── CMakeLists.txt
-├── demo/
-│   └── log_demo.cpp
-├── src/
-│   ├── log.hpp
-│   ├── text_file_backend_self_defined.cpp
-│   └── text_file_backend_self_defined.hpp
-└── test/
-    └── log_test.cpp
+|-- CMakeLists.txt
+|-- demo/
+|   `-- log_demo.cpp
+|-- src/
+|   |-- log.hpp
+|   |-- text_file_backend_self_defined.cpp
+|   `-- text_file_backend_self_defined.hpp
+`-- test/
+    `-- log_test.cpp
 ```
 
 ## When To Use It
