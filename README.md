@@ -32,7 +32,7 @@ cmake --build build
 ./build/demo/log_demo
 ```
 
-By default, the demo initializes logs under `/home/work/log/`. Change the path in `demo/log_demo.cpp` if that directory does not exist on your machine.
+By default, the demo writes rotated log files under `/tmp/goodlog/`.
 
 ## Basic Usage
 
