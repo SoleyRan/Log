@@ -4,6 +4,10 @@ A lightweight C++17 logging wrapper around Boost.Log with colored console output
 
 GoodLog is designed for C++ services, robotics tools, middleware modules, and debugging-heavy applications that need practical logging without rewriting the same Boost.Log setup in every project.
 
+## Preview
+
+![GoodLog terminal output](docs/goodlog-terminal.jpg)
+
 ## Why GoodLog?
 
 Boost.Log is powerful, but the setup can become verbose when a project only needs a clean daily workflow: initialize logging once, print readable messages, keep rotated files, and filter noisy output by severity or channel.
@@ -149,7 +153,6 @@ For a large public framework, a cross-platform package manager release, or a dep
 
 - Add install/export targets for easier downstream CMake integration
 - Add CI builds for Ubuntu
-- Add a screenshot of colored terminal output
 - Add package examples for application integration
 - Clean up channel macro namespace consistency
 - Add a public license before wider reuse
