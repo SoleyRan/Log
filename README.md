@@ -26,12 +26,90 @@ GoodLog keeps Boost.Log as the backend and provides a smaller macro-based interf
 - Hex dump helpers for binary buffers and protocol debugging
 - CMake build with demo and GoogleTest targets
 
-## Quick Start
+## Requirements
+
+GoodLog is currently best supported on Linux and WSL. The current CMake files link Linux system libraries such as `pthread`, `dl`, and `rt`, so native Windows and macOS builds may need small CMake adjustments.
+
+Required for the library and demo:
+
+- C++17 compiler, such as `g++` or `clang++`
+- CMake 3.5+
+- Boost development libraries, including `Boost.Log`, `Boost.LogSetup`, `Boost.Filesystem`, `Boost.Thread`, and `Boost.System`
+
+Required only when building tests:
+
+- GoogleTest development package
+
+If you only want to build and run the demo, you can disable tests with `-DBUILD_TEST=OFF`.
+
+## Install Dependencies
+
+### Ubuntu / Debian / WSL
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake libboost-all-dev libgtest-dev
+```
+
+Then build with tests enabled:
 
 ```bash
 git clone https://github.com/SoleyRan/Log.git
 cd Log
-cmake -S . -B build
+cmake -S . -B build -DBUILD_DEMO=ON -DBUILD_TEST=ON
+cmake --build build
+ctest --test-dir build
+./build/demo/log_demo
+```
+
+If you do not want to install GoogleTest, build only the library and demo:
+
+```bash
+git clone https://github.com/SoleyRan/Log.git
+cd Log
+cmake -S . -B build -DBUILD_DEMO=ON -DBUILD_TEST=OFF
+cmake --build build
+./build/demo/log_demo
+```
+
+### Fedora
+
+```bash
+sudo dnf install -y gcc-c++ cmake boost-devel gtest-devel
+```
+
+Then use the same CMake commands shown above.
+
+### macOS
+
+macOS is not the primary tested target yet. You can install the basic dependencies with Homebrew:
+
+```bash
+brew install cmake boost googletest
+```
+
+The current CMake files contain Linux-specific linker flags, so macOS may require CMake cleanup before it builds cleanly.
+
+### Windows
+
+For Windows users, WSL Ubuntu is the recommended path today:
+
+```powershell
+wsl --install
+```
+
+After entering Ubuntu in WSL, follow the Ubuntu / Debian setup above.
+
+Native Windows support is not fully documented yet because the current CMake files use Linux-specific libraries.
+
+## Quick Start
+
+For a minimal Linux/WSL build without tests:
+
+```bash
+git clone https://github.com/SoleyRan/Log.git
+cd Log
+cmake -S . -B build -DBUILD_TEST=OFF
 cmake --build build
 ./build/demo/log_demo
 ```
@@ -121,12 +199,52 @@ cmake --build build
 ctest --test-dir build
 ```
 
-Dependencies:
+Options:
 
-- C++17 compiler
-- CMake 3.5+
-- Boost with Log, Filesystem, Thread, System, and Log Setup libraries
-- GoogleTest when `BUILD_TEST=ON`
+| Option | Default | Description |
+| --- | --- | --- |
+| `BUILD_DEMO` | `ON` | Builds `demo/log_demo.cpp` |
+| `BUILD_TEST` | `ON` | Builds GoogleTest tests under `test/` |
+
+Useful build variants:
+
+```bash
+# Build library and demo only
+cmake -S . -B build -DBUILD_DEMO=ON -DBUILD_TEST=OFF
+
+# Build library only
+cmake -S . -B build -DBUILD_DEMO=OFF -DBUILD_TEST=OFF
+
+# Build with tests
+cmake -S . -B build -DBUILD_DEMO=ON -DBUILD_TEST=ON
+```
+
+## Troubleshooting
+
+If CMake cannot find Boost, make sure the Boost development package is installed:
+
+```bash
+sudo apt install -y libboost-all-dev
+```
+
+If CMake cannot find GTest, either install it or disable tests:
+
+```bash
+sudo apt install -y libgtest-dev
+cmake -S . -B build -DBUILD_TEST=ON
+```
+
+or:
+
+```bash
+cmake -S . -B build -DBUILD_TEST=OFF
+```
+
+If the demo runs but no log files are obvious, check the default output directory:
+
+```bash
+ls -la /tmp/goodlog/
+```
 
 ## Project Layout
 
@@ -155,4 +273,4 @@ For a large public framework, a cross-platform package manager release, or a dep
 - Add CI builds for Ubuntu
 - Add package examples for application integration
 - Clean up channel macro namespace consistency
-- Add a public license before wider reuse
+- Improve native Windows and macOS CMake support
