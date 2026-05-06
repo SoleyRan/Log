@@ -1,4 +1,5 @@
 # GoodLog
+<img width="1280" height="640" alt="goodlog-readme-banner-1280x640" src="https://github.com/user-attachments/assets/9387939a-d1c9-4a76-bd01-3c8ae888889d" />
 
 A lightweight C++17 logging wrapper around Boost.Log with colored console output, automatic source location, rotating log files, severity filtering, and binary hex dump helpers.
 
