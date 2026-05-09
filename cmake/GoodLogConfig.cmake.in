@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Boost REQUIRED COMPONENTS system log_setup log thread filesystem)
+find_dependency(Threads REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/GoodLogTargets.cmake")
+
+check_required_components(GoodLog)
