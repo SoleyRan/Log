@@ -26,6 +26,7 @@ GoodLog keeps Boost.Log as the backend and provides a smaller macro-based interf
 - Optional channel filtering during initialization
 - Hex dump helpers for binary buffers and protocol debugging
 - CMake build with demo and GoogleTest targets
+- Installable CMake package with `find_package(GoodLog)` support
 
 ## Requirements
 
@@ -116,6 +117,91 @@ cmake --build build
 ```
 
 By default, the demo writes rotated log files under `/tmp/goodlog/`.
+
+## Install As A CMake Package
+
+GoodLog can be installed into a prefix and consumed by another CMake project with `find_package(GoodLog)`.
+
+Install to a local user prefix:
+
+```bash
+git clone https://github.com/SoleyRan/Log.git
+cd Log
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_DEMO=OFF -DBUILD_TEST=OFF
+cmake --build build
+cmake --install build --prefix "$HOME/.local"
+```
+
+Install to a system prefix:
+
+```bash
+git clone https://github.com/SoleyRan/Log.git
+cd Log
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_DEMO=OFF -DBUILD_TEST=OFF
+cmake --build build
+sudo cmake --install build --prefix /usr/local
+```
+
+The install layout looks like this:
+
+```text
+<prefix>/
+|-- include/goodlog/
+|   |-- log.hpp
+|   `-- text_file_backend_self_defined.hpp
+|-- lib/
+|   `-- libgood_log.so
+`-- lib/cmake/GoodLog/
+    |-- GoodLogConfig.cmake
+    |-- GoodLogConfigVersion.cmake
+    |-- GoodLogTargets.cmake
+    `-- GoodLogTargets-*.cmake
+```
+
+Use it from another CMake project:
+
+```cmake
+cmake_minimum_required(VERSION 3.5)
+project(MyApp LANGUAGES CXX)
+
+find_package(GoodLog REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE GoodLog::good_log)
+```
+
+Then include GoodLog in your source file:
+
+```cpp
+#include <log.hpp>
+
+int main()
+{
+    goodlog::logInit("/tmp/my_app_logs/", 2, 1, 10, 10);
+    LOG_Info() << "hello from installed GoodLog";
+    return 0;
+}
+```
+
+If GoodLog is installed to a custom prefix, point CMake to that prefix when configuring your application:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/.local"
+cmake --build build
+```
+
+## Create A Release Package
+
+You can stage an install tree and archive it for a GitHub release:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_DEMO=OFF -DBUILD_TEST=OFF
+cmake --build build
+cmake --install build --prefix package/goodlog-0.1.0
+tar -C package -czf goodlog-0.1.0-linux-x86_64.tar.gz goodlog-0.1.0
+```
+
+Users can unpack the archive and pass its path through `CMAKE_PREFIX_PATH`.
 
 ## Basic Usage
 
@@ -241,6 +327,12 @@ or:
 cmake -S . -B build -DBUILD_TEST=OFF
 ```
 
+If your application cannot find an installed GoodLog package, pass the install prefix through `CMAKE_PREFIX_PATH`:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$HOME/.local"
+```
+
 If the demo runs but no log files are obvious, check the default output directory:
 
 ```bash
@@ -252,6 +344,8 @@ ls -la /tmp/goodlog/
 ```text
 .
 |-- CMakeLists.txt
+|-- cmake/
+|   `-- GoodLogConfig.cmake.in
 |-- demo/
 |   `-- log_demo.cpp
 |-- src/
@@ -270,7 +364,6 @@ For a large public framework, a cross-platform package manager release, or a dep
 
 ## Roadmap
 
-- Add install/export targets for easier downstream CMake integration
 - Add CI builds for Ubuntu
 - Add package examples for application integration
 - Clean up channel macro namespace consistency
