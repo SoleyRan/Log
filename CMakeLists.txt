@@ -24,6 +24,7 @@ if(BUILD_TEST)
     message("=============================================================")
     message("-- BUILD TEST --")
     message("=============================================================")
+    enable_testing()
     add_subdirectory(test)
 endif()
 
