@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <string>
+#include <stdexcept>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/log/support/date_time.hpp>
 #include <boost/log/common.hpp>
@@ -35,6 +36,57 @@ namespace src = boost::log::sources;
 namespace sinks = boost::log::sinks;
 namespace expr = boost::log::expressions;
 namespace keywords = boost::log::keywords;
+
+enum class CompressionMode
+{
+    None,
+    Gzip
+};
+
+enum class EncryptionMode
+{
+    None,
+    Aes256Gcm
+};
+
+struct LogOptions
+{
+    CompressionMode compression = CompressionMode::None;
+    EncryptionMode encryption = EncryptionMode::None;
+    std::string encryption_key_hex;
+};
+
+namespace detail
+{
+static inline sinks::text_file_storage_options to_backend_options(LogOptions const& options)
+{
+    sinks::text_file_storage_options backend_options;
+    switch (options.compression) {
+    case CompressionMode::None:
+        backend_options.compression = sinks::compression_mode::none;
+        break;
+    case CompressionMode::Gzip:
+        backend_options.compression = sinks::compression_mode::gzip;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported GoodLog compression mode");
+    }
+
+    switch (options.encryption) {
+    case EncryptionMode::None:
+        backend_options.encryption = sinks::encryption_mode::none;
+        break;
+    case EncryptionMode::Aes256Gcm:
+        backend_options.encryption = sinks::encryption_mode::aes_256_gcm;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported GoodLog encryption mode");
+    }
+
+    backend_options.encryption_key_hex = options.encryption_key_hex;
+    return backend_options;
+}
+}
 
 
 using loggerChannelType = boost::log::sources::severity_channel_logger_mt<boost::log::trivial::severity_level, std::string>;
@@ -84,7 +136,7 @@ BOOST_LOG_ATTRIBUTE_KEYWORD(log_timestamp, "TimeStamp", boost::posix_time::ptime
  * @param max_log_num 最多存储log文件个数
  * @param channel_name channel名，用于指定写入指定channel,默认为空
 */
-static inline void logInit(std::string log_path_str, int in_console_level, int in_file_level, int max_log_size, int max_log_num, std::string channel_name = ""){
+static inline void logInit(std::string log_path_str, int in_console_level, int in_file_level, int max_log_size, int max_log_num, std::string channel_name, LogOptions const& options){
     boost::log::trivial::severity_level console_level;
     boost::log::trivial::severity_level file_level;
     console_level = static_cast<boost::log::trivial::severity_level>(in_console_level);
@@ -100,6 +152,7 @@ static inline void logInit(std::string log_path_str, int in_console_level, int i
     typedef sinks::asynchronous_sink<sinks::text_file_backend_self_defined> async_sink;  
     boost::shared_ptr<async_sink> file_sink = boost::make_shared<async_sink>(); 
 
+    file_sink->locked_backend()->set_storage_options(detail::to_backend_options(options));
     file_sink->locked_backend()->set_file_name_pattern(log_path_str + "%5N-%Y-%m-%d-%H-%M-%S.log"); //五位序列号-年-月-日-时-分-秒.log
     file_sink->locked_backend()->set_rotation_size(max_log_size*(1<<20));
     file_sink->locked_backend()->set_time_based_rotation(sinks::file::rotation_at_time_point(0,0,0));    //打开则在时间跳变时新建日志
@@ -114,7 +167,11 @@ static inline void logInit(std::string log_path_str, int in_console_level, int i
         keywords::max_files = max_log_num   //存储最多文件数
         ));
 
-    file_sink->locked_backend()->scan_for_files();  //扫描collector下文件夹，来指导序列号N的起始
+    if (options.compression != CompressionMode::None || options.encryption != EncryptionMode::None) {
+        file_sink->locked_backend()->scan_for_files(sinks::file::scan_all, false);
+    } else {
+        file_sink->locked_backend()->scan_for_files();  //扫描collector下文件夹，来指导序列号N的起始
+    }
     file_sink->set_formatter(formatter);    //设置输出格式
 
     auto console_sink=logging::add_console_log();
@@ -137,6 +194,14 @@ static inline void logInit(std::string log_path_str, int in_console_level, int i
     logging::core::get()->add_sink(file_sink);
 
     LOG_Warn() << "New Log Init";  //用于标识新建日志
+}
+
+static inline void logInit(std::string log_path_str, int in_console_level, int in_file_level, int max_log_size, int max_log_num, std::string channel_name = ""){
+    logInit(log_path_str, in_console_level, in_file_level, max_log_size, max_log_num, channel_name, LogOptions{});
+}
+
+static inline void logInit(std::string log_path_str, int in_console_level, int in_file_level, int max_log_size, int max_log_num, LogOptions const& options){
+    logInit(log_path_str, in_console_level, in_file_level, max_log_size, max_log_num, "", options);
 }
 
 }

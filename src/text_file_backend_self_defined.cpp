@@ -15,12 +15,16 @@
 #include <cstddef>
 #include <list>
 #include <string>
+#include <vector>
 #include <locale>
 #include <ostream>
 #include <sstream>
+#include <iomanip>
+#include <memory>
 #include <iterator>
 #include <algorithm>
 #include <stdexcept>
+#include <cstring>
 #include <boost/ref.hpp>
 #include <boost/bind.hpp>
 #include <boost/cstdint.hpp>
@@ -48,6 +52,9 @@
 #include "text_file_backend_self_defined.hpp"
 // #include "unique_ptr.hpp"
 #include <unordered_set>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <zlib.h>
 
 #if !defined(BOOST_LOG_NO_THREADS)
 #include <boost/thread/locks.hpp>
@@ -98,6 +105,136 @@ BOOST_LOG_ANONYMOUS_NAMESPACE {
 
     typedef filesystem::path::string_type path_string_type;
     typedef path_string_type::value_type path_char_type;
+
+    std::vector<unsigned char> parse_hex_key(std::string const& key_hex)
+    {
+        if (key_hex.size() != 64)
+        {
+            BOOST_THROW_EXCEPTION(std::invalid_argument("AES-256-GCM encryption_key_hex must contain 64 hex characters"));
+        }
+
+        std::vector<unsigned char> key;
+        key.reserve(32);
+        for (std::size_t i = 0; i < key_hex.size(); i += 2)
+        {
+            if (!std::isxdigit(static_cast<unsigned char>(key_hex[i])) ||
+                !std::isxdigit(static_cast<unsigned char>(key_hex[i + 1])))
+            {
+                BOOST_THROW_EXCEPTION(std::invalid_argument("AES-256-GCM encryption_key_hex contains non-hex characters"));
+            }
+            unsigned int byte = 0;
+            std::istringstream stream(key_hex.substr(i, 2));
+            stream >> std::hex >> byte;
+            if (!stream || byte > 0xFF)
+            {
+                BOOST_THROW_EXCEPTION(std::invalid_argument("AES-256-GCM encryption_key_hex contains non-hex characters"));
+            }
+            key.push_back(static_cast<unsigned char>(byte));
+        }
+        return key;
+    }
+
+    std::string to_hex(unsigned char const* data, std::size_t size)
+    {
+        static const char* digits = "0123456789abcdef";
+        std::string hex;
+        hex.reserve(size * 2);
+        for (std::size_t i = 0; i < size; ++i)
+        {
+            unsigned char byte = data[i];
+            hex.push_back(digits[(byte >> 4) & 0x0F]);
+            hex.push_back(digits[byte & 0x0F]);
+        }
+        return hex;
+    }
+
+    std::vector<unsigned char> gzip_compress_record(std::string const& data)
+    {
+        z_stream stream;
+        std::memset(&stream, 0, sizeof(stream));
+        if (deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to initialize gzip compressor"));
+        }
+
+        std::vector<unsigned char> output;
+        output.resize(deflateBound(&stream, static_cast<uLong>(data.size())));
+
+        stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
+        stream.avail_in = static_cast<uInt>(data.size());
+        stream.next_out = output.data();
+        stream.avail_out = static_cast<uInt>(output.size());
+
+        int result = deflate(&stream, Z_FINISH);
+        if (result != Z_STREAM_END)
+        {
+            deflateEnd(&stream);
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to gzip-compress log record"));
+        }
+
+        output.resize(stream.total_out);
+        deflateEnd(&stream);
+        return output;
+    }
+
+    std::string encrypt_aes_256_gcm_line(
+        std::vector<unsigned char> const& key,
+        unsigned char const* data,
+        std::size_t size,
+        bool compressed)
+    {
+        unsigned char nonce[12];
+        if (RAND_bytes(nonce, sizeof(nonce)) != 1)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to generate AES-GCM nonce"));
+        }
+
+        EVP_CIPHER_CTX* raw_ctx = EVP_CIPHER_CTX_new();
+        if (!raw_ctx)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to allocate AES-GCM context"));
+        }
+        std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)> ctx(raw_ctx, EVP_CIPHER_CTX_free);
+
+        if (EVP_EncryptInit_ex(ctx.get(), EVP_aes_256_gcm(), NULL, NULL, NULL) != 1 ||
+            EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, sizeof(nonce), NULL) != 1 ||
+            EVP_EncryptInit_ex(ctx.get(), NULL, NULL, key.data(), nonce) != 1)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to initialize AES-256-GCM encryption"));
+        }
+
+        std::vector<unsigned char> ciphertext(size + EVP_CIPHER_block_size(EVP_aes_256_gcm()));
+        int bytes_written = 0;
+        int total_written = 0;
+        if (size > 0 &&
+            EVP_EncryptUpdate(ctx.get(), ciphertext.data(), &bytes_written, data, static_cast<int>(size)) != 1)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to encrypt log record"));
+        }
+        total_written += bytes_written;
+
+        if (EVP_EncryptFinal_ex(ctx.get(), ciphertext.data() + total_written, &bytes_written) != 1)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to finalize AES-256-GCM encryption"));
+        }
+        total_written += bytes_written;
+        ciphertext.resize(static_cast<std::size_t>(total_written));
+
+        unsigned char tag[16];
+        if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_GET_TAG, sizeof(tag), tag) != 1)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to read AES-GCM authentication tag"));
+        }
+
+        std::string line = compressed ? "GLENC1Z:" : "GLENC1:";
+        line += to_hex(nonce, sizeof(nonce));
+        line += ":";
+        line += to_hex(tag, sizeof(tag));
+        line += ":";
+        line += to_hex(ciphertext.data(), ciphertext.size());
+        line += "\n";
+        return line;
+    }
 
     //! An auxiliary traits that contain various constants and functions regarding string and character operations
     template< typename CharT >
@@ -1101,6 +1238,13 @@ struct text_file_backend_self_defined::implementation
     bool m_AutoFlush;
     //! The flag indicates whether the final rotation should be performed
     bool m_FinalRotationEnabled;
+    //! Optional storage transform settings
+    text_file_storage_options m_StorageOptions;
+    //! Parsed AES-256 key
+    std::vector<unsigned char> m_EncryptionKey;
+    //! Streaming gzip state for compression-only mode
+    z_stream m_GzipStream;
+    bool m_GzipInitialized;
 
     implementation(uintmax_t rotation_size, bool auto_flush, bool enable_final_rotation) :
         m_FileOpenMode(std::ios_base::trunc | std::ios_base::out),
@@ -1108,10 +1252,114 @@ struct text_file_backend_self_defined::implementation
         m_CharactersWritten(0),
         m_FileRotationSize(rotation_size),
         m_AutoFlush(auto_flush),
-        m_FinalRotationEnabled(enable_final_rotation)
+        m_FinalRotationEnabled(enable_final_rotation),
+        m_GzipInitialized(false)
     {
+        std::memset(&m_GzipStream, 0, sizeof(m_GzipStream));
     }
 };
+
+namespace {
+
+bool compression_enabled(text_file_storage_options const& options)
+{
+    return options.compression == compression_mode::gzip;
+}
+
+bool encryption_enabled(text_file_storage_options const& options)
+{
+    return options.encryption == encryption_mode::aes_256_gcm;
+}
+
+filesystem::path apply_storage_extension(filesystem::path path, text_file_storage_options const& options)
+{
+    std::string name = path.filename().string();
+    if (compression_enabled(options))
+        name += ".gz";
+    if (encryption_enabled(options))
+        name += ".enc";
+    return path.parent_path() / name;
+}
+
+template< typename ImplT >
+void start_gzip_stream(ImplT& impl)
+{
+    if (impl.m_GzipInitialized || !compression_enabled(impl.m_StorageOptions) || encryption_enabled(impl.m_StorageOptions))
+        return;
+
+    std::memset(&impl.m_GzipStream, 0, sizeof(impl.m_GzipStream));
+    int result = deflateInit2(&impl.m_GzipStream, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
+    if (result != Z_OK)
+    {
+        BOOST_THROW_EXCEPTION(std::runtime_error("Failed to initialize gzip stream"));
+    }
+    impl.m_GzipInitialized = true;
+}
+
+template< typename ImplT >
+void write_gzip_stream(ImplT& impl, char const* data, std::size_t size, int flush_mode)
+{
+    if (!impl.m_GzipInitialized)
+        start_gzip_stream(impl);
+
+    unsigned char buffer[16384];
+    impl.m_GzipStream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data));
+    impl.m_GzipStream.avail_in = static_cast<uInt>(size);
+
+    do
+    {
+        impl.m_GzipStream.next_out = buffer;
+        impl.m_GzipStream.avail_out = sizeof(buffer);
+        int result = deflate(&impl.m_GzipStream, flush_mode);
+        if (result == Z_STREAM_ERROR)
+        {
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to write gzip stream"));
+        }
+
+        std::size_t bytes_to_write = sizeof(buffer) - impl.m_GzipStream.avail_out;
+        if (bytes_to_write > 0)
+        {
+            impl.m_File.write(reinterpret_cast<char const*>(buffer), static_cast<std::streamsize>(bytes_to_write));
+        }
+    }
+    while (impl.m_GzipStream.avail_out == 0);
+}
+
+template< typename ImplT >
+void finish_gzip_stream(ImplT& impl)
+{
+    if (!impl.m_GzipInitialized)
+        return;
+
+    unsigned char buffer[16384];
+    int result = Z_OK;
+    do
+    {
+        impl.m_GzipStream.next_in = Z_NULL;
+        impl.m_GzipStream.avail_in = 0;
+        impl.m_GzipStream.next_out = buffer;
+        impl.m_GzipStream.avail_out = sizeof(buffer);
+        result = deflate(&impl.m_GzipStream, Z_FINISH);
+        if (result != Z_OK && result != Z_STREAM_END)
+        {
+            deflateEnd(&impl.m_GzipStream);
+            impl.m_GzipInitialized = false;
+            BOOST_THROW_EXCEPTION(std::runtime_error("Failed to finish gzip stream"));
+        }
+
+        std::size_t bytes_to_write = sizeof(buffer) - impl.m_GzipStream.avail_out;
+        if (bytes_to_write > 0)
+        {
+            impl.m_File.write(reinterpret_cast<char const*>(buffer), static_cast<std::streamsize>(bytes_to_write));
+        }
+    }
+    while (result != Z_STREAM_END);
+
+    deflateEnd(&impl.m_GzipStream);
+    impl.m_GzipInitialized = false;
+}
+
+} // namespace
 
 //! Constructor. No streams attached to the constructed backend, auto flush feature disabled.
 BOOST_LOG_API text_file_backend_self_defined::text_file_backend_self_defined()
@@ -1172,6 +1420,30 @@ BOOST_LOG_API void text_file_backend_self_defined::enable_final_rotation(bool en
 BOOST_LOG_API void text_file_backend_self_defined::auto_flush(bool enable)
 {
     m_pImpl->m_AutoFlush = enable;
+}
+
+BOOST_LOG_API void text_file_backend_self_defined::set_storage_options(text_file_storage_options const& options)
+{
+    if (m_pImpl->m_File.is_open())
+    {
+        BOOST_THROW_EXCEPTION(std::logic_error("Storage options must be set before the log file is opened"));
+    }
+
+    if (options.compression != compression_mode::none && options.compression != compression_mode::gzip)
+    {
+        BOOST_THROW_EXCEPTION(std::invalid_argument("Unsupported compression mode"));
+    }
+    if (options.encryption != encryption_mode::none && options.encryption != encryption_mode::aes_256_gcm)
+    {
+        BOOST_THROW_EXCEPTION(std::invalid_argument("Unsupported encryption mode"));
+    }
+
+    m_pImpl->m_StorageOptions = options;
+    m_pImpl->m_EncryptionKey.clear();
+    if (encryption_enabled(options))
+    {
+        m_pImpl->m_EncryptionKey = parse_hex_key(options.encryption_key_hex);
+    }
 }
 
 BOOST_LOG_API std::string text_file_backend_self_defined::convert_time_to_string(const std::time_t& tt,const std::string& format)
@@ -1247,8 +1519,6 @@ BOOST_LOG_API path_string_type text_file_backend_self_defined::get_new_file_name
 //! The method writes the message to the sink
 BOOST_LOG_API void text_file_backend_self_defined::consume(record_view const& rec, string_type const& formatted_message)
 {
-    typedef file_char_traits< string_type::value_type > traits_t;
-
     filesystem::path prev_file_name;
     bool use_prev_file_name = false;
     if (BOOST_UNLIKELY(!m_pImpl->m_File.good()))
@@ -1294,9 +1564,11 @@ BOOST_LOG_API void text_file_backend_self_defined::consume(record_view const& re
         else
             prev_file_name.swap(new_file_name);
 
+        if (!use_prev_file_name)
+            new_file_name = apply_storage_extension(new_file_name, m_pImpl->m_StorageOptions);
         filesystem::create_directories(new_file_name.parent_path());
 
-        m_pImpl->m_File.open(new_file_name, m_pImpl->m_FileOpenMode);
+        m_pImpl->m_File.open(new_file_name, m_pImpl->m_FileOpenMode | std::ios_base::binary);
         if (BOOST_UNLIKELY(!m_pImpl->m_File.is_open()))
         {
             BOOST_THROW_EXCEPTION(filesystem_error(
@@ -1306,16 +1578,51 @@ BOOST_LOG_API void text_file_backend_self_defined::consume(record_view const& re
         }
         m_pImpl->m_FileName.swap(new_file_name);
 
-        if (!m_pImpl->m_OpenHandler.empty())
+        if (!m_pImpl->m_OpenHandler.empty() &&
+            !compression_enabled(m_pImpl->m_StorageOptions) &&
+            !encryption_enabled(m_pImpl->m_StorageOptions))
             m_pImpl->m_OpenHandler(m_pImpl->m_File);
 
         m_pImpl->m_CharactersWritten = static_cast< std::streamoff >(m_pImpl->m_File.tellp());
+        start_gzip_stream(*m_pImpl);
     }
 
-    m_pImpl->m_File.write(formatted_message.data(), static_cast< std::streamsize >(formatted_message.size()));
-    m_pImpl->m_File.put(traits_t::newline);
+    std::string record = formatted_message;
+    record.push_back('\n');
 
-    m_pImpl->m_CharactersWritten += formatted_message.size() + 1;
+    if (encryption_enabled(m_pImpl->m_StorageOptions))
+    {
+        bool compressed = compression_enabled(m_pImpl->m_StorageOptions);
+        std::string encrypted_line;
+        if (compressed)
+        {
+            std::vector<unsigned char> compressed_record = gzip_compress_record(record);
+            encrypted_line = encrypt_aes_256_gcm_line(
+                m_pImpl->m_EncryptionKey,
+                compressed_record.data(),
+                compressed_record.size(),
+                true);
+        }
+        else
+        {
+            encrypted_line = encrypt_aes_256_gcm_line(
+                m_pImpl->m_EncryptionKey,
+                reinterpret_cast<unsigned char const*>(record.data()),
+                record.size(),
+                false);
+        }
+        m_pImpl->m_File.write(encrypted_line.data(), static_cast< std::streamsize >(encrypted_line.size()));
+    }
+    else if (compression_enabled(m_pImpl->m_StorageOptions))
+    {
+        write_gzip_stream(*m_pImpl, record.data(), record.size(), m_pImpl->m_AutoFlush ? Z_SYNC_FLUSH : Z_NO_FLUSH);
+    }
+    else
+    {
+        m_pImpl->m_File.write(record.data(), static_cast< std::streamsize >(record.size()));
+    }
+
+    m_pImpl->m_CharactersWritten += record.size();
 
     if (m_pImpl->m_AutoFlush)
         m_pImpl->m_File.flush();
@@ -1325,7 +1632,11 @@ BOOST_LOG_API void text_file_backend_self_defined::consume(record_view const& re
 BOOST_LOG_API void text_file_backend_self_defined::flush()
 {
     if (m_pImpl->m_File.is_open())
+    {
+        if (m_pImpl->m_GzipInitialized)
+            write_gzip_stream(*m_pImpl, "", 0, Z_SYNC_FLUSH);
         m_pImpl->m_File.flush();
+    }
 }
 
 //! The method sets file name mask
@@ -1419,7 +1730,11 @@ void text_file_backend_self_defined::close_file()
 {
     if (m_pImpl->m_File.is_open())
     {
-        if (!m_pImpl->m_CloseHandler.empty())
+        finish_gzip_stream(*m_pImpl);
+
+        if (!m_pImpl->m_CloseHandler.empty() &&
+            !compression_enabled(m_pImpl->m_StorageOptions) &&
+            !encryption_enabled(m_pImpl->m_StorageOptions))
         {
             // Rationale: We should call the close handler even if the stream is !good() because
             // writing the footer may not be the only thing the handler does. However, there is

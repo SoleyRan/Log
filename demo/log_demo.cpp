@@ -9,7 +9,14 @@ int main()
     int file_log_level = 3;
     int max_log_size = 10;
     int max_log_num = 10;
-    goodlog::logInit(log_path, console_log_level, file_log_level, max_log_size, max_log_num);
+
+    goodlog::LogOptions options;
+    // Enable these when you want compressed or encrypted log files.
+    // options.compression = goodlog::CompressionMode::Gzip;
+    // options.encryption = goodlog::EncryptionMode::Aes256Gcm;
+    // options.encryption_key_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+    goodlog::logInit(log_path, console_log_level, file_log_level, max_log_size, max_log_num, options);
 
     for(int i = 0; i < 1000; ++i)
     {

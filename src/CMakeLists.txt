@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(Boost REQUIRED COMPONENTS system log_setup log thread filesystem)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 add_library(good_log SHARED text_file_backend_self_defined.cpp)
 add_library(GoodLog::good_log ALIAS good_log)
@@ -31,6 +33,8 @@ target_link_libraries(good_log
         Boost::log
         Boost::thread
         Boost::filesystem
+        OpenSSL::Crypto
+        ZLIB::ZLIB
         Threads::Threads
 )
 

@@ -24,6 +24,7 @@ GoodLog 保留 Boost.Log 作为后端，同时提供更小、更直接的宏接�
 - 每条日志自动带上 `file:line` 源码位置
 - 重要级别支持彩色终端前缀
 - 文件 sink 支持按文件大小和文件数量轮转
+- 支持可选 gzip 压缩和 AES-256-GCM 加密日志文件
 - 终端输出和文件输出可以分别设置日志级别阈值
 - 初始化时可选 channel 过滤
 - 支持二进制 buffer 的 Hex Dump
@@ -39,6 +40,8 @@ GoodLog 当前主要面向 Linux 和 WSL。当前 CMake 文件会链接 `pthread
 - C++17 编译器，例如 `g++` 或 `clang++`
 - CMake 3.5+
 - Boost 开发库，包括 `Boost.Log`、`Boost.LogSetup`、`Boost.Filesystem`、`Boost.Thread` 和 `Boost.System`
+- zlib 开发库，用于 gzip 压缩
+- OpenSSL 开发库，用于 AES-256-GCM 加密
 
 构建测试额外需要：
 
@@ -52,7 +55,7 @@ GoodLog 当前主要面向 Linux 和 WSL。当前 CMake 文件会链接 `pthread
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake libboost-all-dev libgtest-dev
+sudo apt install -y build-essential cmake libboost-all-dev libssl-dev zlib1g-dev libgtest-dev
 ```
 
 启用测试构建：
@@ -79,7 +82,7 @@ cmake --build build
 ### Fedora
 
 ```bash
-sudo dnf install -y gcc-c++ cmake boost-devel gtest-devel
+sudo dnf install -y gcc-c++ cmake boost-devel openssl-devel zlib-devel gtest-devel
 ```
 
 然后使用上面的 CMake 构建命令即可。
@@ -89,7 +92,7 @@ sudo dnf install -y gcc-c++ cmake boost-devel gtest-devel
 macOS 目前不是主要测试目标。可以先通过 Homebrew 安装基础依赖：
 
 ```bash
-brew install cmake boost googletest
+brew install cmake boost openssl zlib googletest
 ```
 
 当前 CMake 文件里仍有 Linux 相关链接配置，因此 macOS 可能需要进一步清理 CMake 后才能顺利构建。
@@ -235,6 +238,43 @@ int main()
     return 0;
 }
 ```
+
+## 压缩和加密
+
+`logInit` 保留原有位置参数，同时新增可选的 `goodlog::LogOptions` 参数，用于控制日志落盘前的压缩和加密：
+
+```cpp
+goodlog::LogOptions options;
+options.compression = goodlog::CompressionMode::Gzip;
+options.encryption = goodlog::EncryptionMode::Aes256Gcm;
+options.encryption_key_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+goodlog::logInit(
+    "/tmp/goodlog/",
+    2,
+    1,
+    10,
+    10,
+    options
+);
+```
+
+旧调用方式仍然兼容：
+
+```cpp
+goodlog::logInit("/tmp/goodlog/", 2, 1, 10, 10);
+```
+
+落盘模式：
+
+| 压缩 | 加密 | 输出 |
+| --- | --- | --- |
+| `CompressionMode::None` | `EncryptionMode::None` | 普通 `.log` 文本 |
+| `CompressionMode::Gzip` | `EncryptionMode::None` | 标准 gzip 流，`.log.gz` |
+| `CompressionMode::None` | `EncryptionMode::Aes256Gcm` | AES-256-GCM 逐条记录 envelope，`.log.enc` |
+| `CompressionMode::Gzip` | `EncryptionMode::Aes256Gcm` | 逐条 gzip 后再 AES-256-GCM 加密，`.log.gz.enc` |
+
+加密密钥需要使用 32 字节 key，并编码成 64 位 hex 字符串。生产环境不要把密钥硬编码进源码，建议从部署系统的 secret 或配置层读取。
 
 ## 输出格式
 

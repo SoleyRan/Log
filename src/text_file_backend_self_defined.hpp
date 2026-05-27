@@ -12,6 +12,7 @@
 #include <ios>
 #include <string>
 #include <ostream>
+#include <stdexcept>
 #include <boost/limits.hpp>
 #include <boost/cstdint.hpp>
 #include <boost/smart_ptr/shared_ptr.hpp>
@@ -46,6 +47,25 @@ namespace boost {
 BOOST_LOG_OPEN_NAMESPACE
 
 namespace sinks {
+
+enum class compression_mode
+{
+    none,
+    gzip
+};
+
+enum class encryption_mode
+{
+    none,
+    aes_256_gcm
+};
+
+struct text_file_storage_options
+{
+    compression_mode compression = compression_mode::none;
+    encryption_mode encryption = encryption_mode::none;
+    std::string encryption_key_hex;
+};
 
 namespace file {
 
@@ -484,6 +504,11 @@ public:
      * \param enable The flag indicates whether the automatic buffer flush should be performed.
      */
     BOOST_LOG_API void auto_flush(bool enable = true);
+
+    /*!
+     * Sets optional compression/encryption for records written by this backend.
+     */
+    BOOST_LOG_API void set_storage_options(text_file_storage_options const& options);
 
     /*!
      * \return The name of the currently open log file. If no file is open, returns an empty path.

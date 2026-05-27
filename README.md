@@ -24,6 +24,7 @@ GoodLog keeps Boost.Log as the backend and provides a smaller macro-based interf
 - Automatic `file:line` source location in each log call
 - Colored console prefixes for important severities
 - Rotating file sink with max file size and max file count control
+- Optional gzip compression and AES-256-GCM encrypted log files
 - Console and file severity thresholds can be configured separately
 - Optional channel filtering during initialization
 - Hex dump helpers for binary buffers and protocol debugging
@@ -39,6 +40,8 @@ Required for the library and demo:
 - C++17 compiler, such as `g++` or `clang++`
 - CMake 3.5+
 - Boost development libraries, including `Boost.Log`, `Boost.LogSetup`, `Boost.Filesystem`, `Boost.Thread`, and `Boost.System`
+- zlib development library for gzip compression
+- OpenSSL development library for AES-256-GCM encryption
 
 Required only when building tests:
 
@@ -52,7 +55,7 @@ If you only want to build and run the demo, you can disable tests with `-DBUILD_
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake libboost-all-dev libgtest-dev
+sudo apt install -y build-essential cmake libboost-all-dev libssl-dev zlib1g-dev libgtest-dev
 ```
 
 Then build with tests enabled:
@@ -79,7 +82,7 @@ cmake --build build
 ### Fedora
 
 ```bash
-sudo dnf install -y gcc-c++ cmake boost-devel gtest-devel
+sudo dnf install -y gcc-c++ cmake boost-devel openssl-devel zlib-devel gtest-devel
 ```
 
 Then use the same CMake commands shown above.
@@ -89,7 +92,7 @@ Then use the same CMake commands shown above.
 macOS is not the primary tested target yet. You can install the basic dependencies with Homebrew:
 
 ```bash
-brew install cmake boost googletest
+brew install cmake boost openssl zlib googletest
 ```
 
 The current CMake files contain Linux-specific linker flags, so macOS may require CMake cleanup before it builds cleanly.
@@ -235,6 +238,43 @@ int main()
     return 0;
 }
 ```
+
+## Compression and Encryption
+
+`logInit` keeps the original positional arguments and adds an optional `goodlog::LogOptions` parameter for storage transforms:
+
+```cpp
+goodlog::LogOptions options;
+options.compression = goodlog::CompressionMode::Gzip;
+options.encryption = goodlog::EncryptionMode::Aes256Gcm;
+options.encryption_key_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+goodlog::logInit(
+    "/tmp/goodlog/",
+    2,
+    1,
+    10,
+    10,
+    options
+);
+```
+
+The legacy call remains valid:
+
+```cpp
+goodlog::logInit("/tmp/goodlog/", 2, 1, 10, 10);
+```
+
+Storage modes:
+
+| Compression | Encryption | Output |
+| --- | --- | --- |
+| `CompressionMode::None` | `EncryptionMode::None` | Plain `.log` text |
+| `CompressionMode::Gzip` | `EncryptionMode::None` | Standard gzip stream, `.log.gz` |
+| `CompressionMode::None` | `EncryptionMode::Aes256Gcm` | AES-256-GCM record envelope, `.log.enc` |
+| `CompressionMode::Gzip` | `EncryptionMode::Aes256Gcm` | Per-record gzip, then AES-256-GCM, `.log.gz.enc` |
+
+Encryption requires a 32-byte key encoded as 64 lowercase or uppercase hex characters. Do not hard-code production keys in source code; load them from your deployment secret store or configuration layer.
 
 ## Output Shape
 
